@@ -1,0 +1,5 @@
+title: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+description: d
+stage: GA
+includedPermissions:
+  - cloudsql.instances.get

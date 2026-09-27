@@ -1,0 +1,5 @@
+# Security approves every change here: the role files AND the grants
+# (ADR-0018 §7). Declared, not yet enforced: no ruleset in this org requires
+# a code owner's approval, because one person is the only member of both
+# teams and GitHub does not let an author approve their own pull request.
+* @platform-factory/security

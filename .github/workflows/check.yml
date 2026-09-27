@@ -1,0 +1,52 @@
+# The intent gate for this repo (ADR-0018 §6). No cloud credential: nothing
+# here applies anything, and this org holds no CI identity with cloud
+# permissions, by design (ADR-0018 §8). The apply is a person's step.
+#
+# What scripts/check_roles.py refuses, and why, is at its top. It first proves
+# it can refuse (every fixture in tests/must-fail must be refused by the rule
+# it names, ADR-0019 §4), then checks the real role files and grants, including
+# that the one conditioned grant's condition is byte-identical to
+# platform-bootstrap layer 0's.
+#
+# Advisory for now: no ruleset in this org requires a passing check yet
+# (ADR-0018 §7).
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  roles:
+    name: role files and grants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The condition the grants must copy, from the repo that owns it. Public,
+      # so no token.
+      - name: Fetch platform-bootstrap layer 0's IAM file
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/layer0-iam.tf" \
+            https://raw.githubusercontent.com/platform-factory/platform-bootstrap/main/layers/0-foundation/iam.tf
+
+      - name: The check refuses every known-bad fixture
+        run: python3 scripts/check_roles.py --self-test --bootstrap-iam "$RUNNER_TEMP/layer0-iam.tf"
+
+      - name: Check the role files and grants
+        run: python3 scripts/check_roles.py --bootstrap-iam "$RUNNER_TEMP/layer0-iam.tf"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.15"
+
+      - name: terraform fmt and validate (no backend, no credentials)
+        working-directory: terraform
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false
+          terraform validate
