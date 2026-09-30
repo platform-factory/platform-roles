@@ -26,12 +26,29 @@ What it refuses
     [keys-or-act-as]     a service-account key, or acting as another account
     [project-set-iam]    resourcemanager.projects.setIamPolicy outside
                          platformEngineProjectIam.yaml
-  grants (terraform/*.tf):
+  grants (terraform/*.tf), as an ALLOWLIST: what is not named below is refused,
+  so a new way to grant something has to be added here, in review, first.
+    [resource-kind]      any resource other than a project custom role or a
+                         project IAM member (so no _binding or _policy, no
+                         grant on the organisation, a folder or another
+                         service account); any module; any *.tf.json file,
+                         which this check cannot read
+    [inline-role]        a custom role that does not take its permissions
+                         from a file in roles/, where the rules above apply
+    [role-not-listed]    a grant of anything but one of the custom roles in
+                         roles/, or a built-in role outside the short list
+                         each file may grant (BUILT_IN_ROLES below)
+    [member]             a grant to anyone but the engine
     [unconditioned]      a grant of a role that can set the project's policy
                          without the condition: one such grant voids it
                          (ADR-0018 §3)
     [condition-text]     a condition not byte-identical to platform-bootstrap
                          layer 0's
+
+Its limit: it reads Terraform with regular expressions, not a parser. It is a
+net for slips in the files a reviewer reads, and it fails closed (a value it
+cannot read is refused). How roles.tf builds `local.roles` from roles/ is
+still the reviewer's to read.
 
 How to run it
 -------------
@@ -69,6 +86,33 @@ PROJECT_SET_IAM = "resourcemanager.projects.setIamPolicy"
 PROJECT_IAM_FILE = "platformEngineProjectIam"
 # Roles that can set the project's allow policy, and so must be conditioned.
 POLICY_SETTING_ROLES = {"roles/resourcemanager.projectIamAdmin", "roles/owner", "roles/editor"}
+
+# Everything terraform/*.tf may create: the custom roles, and grants of roles
+# on the project. A grant written any other way is one the rules below would
+# never see.
+RESOURCE_KINDS = {"google_project_iam_custom_role", "google_project_iam_member"}
+# The built-in roles the engine may hold, by the file that may grant them.
+# grants-broad.tf exists only between apply A and apply B (ADR-0018 §4), so
+# once it is deleted the broad roles cannot come back through another file.
+BUILT_IN_ROLES = {
+    "grants.tf": {"roles/compute.viewer"},
+    "grants-broad.tf": {
+        "roles/cloudsql.admin",
+        "roles/artifactregistry.admin",
+        "roles/iam.serviceAccountAdmin",
+        "roles/resourcemanager.projectIamAdmin",
+    },
+}
+# How a grant names one of this repo's custom roles.
+CUSTOM_ROLE_REF = re.compile(r'^google_project_iam_custom_role\.engine\["([A-Za-z0-9_.]+)"\]\.id$')
+# What the one custom-role block must say, so that every role's permissions
+# come from a file in roles/ and pass check_role_files.
+CUSTOM_ROLE_BLOCK = {
+    "for_each": "local.roles",
+    "role_id": "each.key",
+    "permissions": "each.value.includedPermissions",
+}
+ENGINE = "local.engine"
 
 
 def check_role_files(roles_dir):
@@ -129,13 +173,56 @@ def layer0_condition(bootstrap_iam):
     raise SystemExit(f"no crossplane_provider_project_iam_admin block in {bootstrap_iam}")
 
 
-def check_grants(terraform_dir, expected_condition):
+def without_comments(text):
+    """Drop whole-line comments, so a rule never trips on a word in one."""
+    return re.sub(r"(?m)^\s*(#|//).*$", "", text)
+
+
+def attribute(body, key):
+    """The text after `key =` on its own line in a block, or None."""
+    found = re.search(r"(?m)^\s*%s\s*=\s*(.+?)\s*$" % re.escape(key), body)
+    return found.group(1) if found else None
+
+
+def check_grants(terraform_dir, roles_dir, expected_condition):
     problems = []
+    role_files = {path.stem for path in roles_dir.glob("*.yaml")}
+
+    for path in sorted(terraform_dir.glob("*.tf.json")):
+        problems.append(("resource-kind", f"terraform/{path.name}: Terraform loads *.tf.json files, and this check cannot read them"))
+
     for path in sorted(terraform_dir.glob("*.tf")):
-        for name, body in blocks(path.read_text(), "google_project_iam_member"):
+        text = without_comments(path.read_text())
+
+        # Only the two kinds of resource this repo exists to hold, and no
+        # module, which could hold any kind.
+        for kind, name in re.findall(r'resource\s+"([^"]+)"\s+"([^"]+)"', text):
+            if kind not in RESOURCE_KINDS:
+                problems.append(("resource-kind", f"terraform/{path.name}: {name}: a {kind} is not one of {sorted(RESOURCE_KINDS)}; every grant the engine holds is a google_project_iam_member (ADR-0018 §1)"))
+        for name in re.findall(r'(?m)^\s*module\s+"([^"]+)"', text):
+            problems.append(("resource-kind", f"terraform/{path.name}: module {name}: this root holds plain blocks only, one per grant (ADR-0018 §8)"))
+
+        for name, body in blocks(text, "google_project_iam_custom_role"):
             where = f"terraform/{path.name}: {name}"
-            role = re.search(r"\brole\s*=\s*(.+)", body).group(1).strip()
-            sets_policy = PROJECT_IAM_FILE in role or role.strip('"') in POLICY_SETTING_ROLES
+            found = {key: attribute(body, key) for key in CUSTOM_ROLE_BLOCK}
+            if name != "engine" or found != CUSTOM_ROLE_BLOCK:
+                problems.append(("inline-role", f"{where}: a custom role must be a file in roles/, read by the one `engine` block in roles.tf; written here, its permissions skip every role-file rule"))
+
+        for name, body in blocks(text, "google_project_iam_member"):
+            where = f"terraform/{path.name}: {name}"
+            role = attribute(body, "role") or ""
+            custom = CUSTOM_ROLE_REF.match(role)
+            built_in = role.strip('"') if re.fullmatch(r'"[^"]*"', role) else None
+            if custom:
+                listed = custom.group(1) in role_files
+            else:
+                listed = built_in in BUILT_IN_ROLES.get(path.name, set())
+            if not listed:
+                problems.append(("role-not-listed", f"{where}: role {role or '<none>'} is neither a custom role in roles/ nor a built-in role {path.name} may grant (BUILT_IN_ROLES in this script)"))
+            if attribute(body, "member") != ENGINE:
+                problems.append(("member", f"{where}: this repo grants to the engine only (member = {ENGINE})"))
+
+            sets_policy = (custom and custom.group(1) == PROJECT_IAM_FILE) or built_in in POLICY_SETTING_ROLES
             condition = condition_fields(body)
             if sets_policy and condition is None:
                 problems.append(("unconditioned", f"{where}: grants a role that can set the project's policy with no condition; one such grant voids the condition (ADR-0018 §3)"))
@@ -145,7 +232,7 @@ def check_grants(terraform_dir, expected_condition):
 
 
 def check_repo(root, expected_condition):
-    return check_role_files(root / "roles") + check_grants(root / "terraform", expected_condition)
+    return check_role_files(root / "roles") + check_grants(root / "terraform", root / "roles", expected_condition)
 
 
 def self_test(expected_condition):
@@ -157,10 +244,14 @@ def self_test(expected_condition):
         return False
     for case in cases:
         expected = (case / "expect").read_text().strip()
-        # A fixture holds only what it changes; everything else is the real repo.
-        roles_dir = case / "roles" if (case / "roles").is_dir() else REPO / "roles"
-        terraform_dir = case / "terraform" if (case / "terraform").is_dir() else REPO / "terraform"
-        rules = {rule for rule, _ in check_role_files(roles_dir) + check_grants(terraform_dir, expected_condition)}
+        # A fixture holds only the folder it changes, and only that folder is
+        # checked, so the refusal has to come from the change itself.
+        problems = []
+        if (case / "roles").is_dir():
+            problems += check_role_files(case / "roles")
+        if (case / "terraform").is_dir():
+            problems += check_grants(case / "terraform", REPO / "roles", expected_condition)
+        rules = {rule for rule, _ in problems}
         if expected in rules:
             print(f"ok   must-fail/{case.name}: refused by [{expected}]")
         else:
