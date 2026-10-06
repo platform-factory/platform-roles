@@ -1,0 +1,6 @@
+title: fixture
+description: fixture
+stage: GA
+includedPermissions:
+  - cloudsql.instances.create
+  - cloudsql.instances.delete

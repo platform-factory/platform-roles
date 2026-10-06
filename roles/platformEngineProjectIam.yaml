@@ -1,0 +1,12 @@
+# The Config Connector engine's project-IAM permissions (ADR-0018 §2, §3).
+# Replaces roles/resourcemanager.projectIamAdmin (9) with the 2 its calls
+# need. This role is only ever granted under the two-role IAM Condition, and
+# never merged with another role: Artifact Registry and Cloud SQL do not
+# recognise the condition's attribute, so a merged role's other grants would
+# fail. It is the only file here that may hold projects.setIamPolicy.
+title: Platform engine - project IAM
+description: Lets Config Connector read the project's allow policy and grant exactly roles/cloudsql.client and roles/cloudsql.instanceUser, under an IAM Condition (ADR-0018).
+stage: GA
+includedPermissions:
+  - resourcemanager.projects.getIamPolicy
+  - resourcemanager.projects.setIamPolicy

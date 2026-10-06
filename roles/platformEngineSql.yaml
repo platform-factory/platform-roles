@@ -1,0 +1,17 @@
+# The Config Connector engine's Cloud SQL permissions (ADR-0018 §2).
+# Replaces roles/cloudsql.admin (173 permissions) with the 8 its calls need.
+# Left out on purpose: every delete (instance, database, user) — the third
+# deletion lock — plus users.update (a password reset is a person's gcloud
+# command) and export, import, clone and restore.
+title: Platform engine - Cloud SQL
+description: What Config Connector needs to create, adopt and update the paved road's Cloud SQL instances, databases and IAM users. No delete (ADR-0018).
+stage: GA
+includedPermissions:
+  - cloudsql.databases.create
+  - cloudsql.databases.get
+  - cloudsql.databases.update
+  - cloudsql.instances.create
+  - cloudsql.instances.get
+  - cloudsql.instances.update
+  - cloudsql.users.create
+  - cloudsql.users.list

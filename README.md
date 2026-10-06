@@ -375,11 +375,11 @@ Same family, for the runbook:
 
 ### Sources read
 
-Local:
-- `/Users/ronakpatel/code/platform-factory/platform-factory/docs/adr/0018-engine-permissions-are-a-list-in-platform-roles.md`
-- `/Users/ronakpatel/code/platform-factory/platform-config/charts/system/templates/{identity,access,registry,namespace,argocd,configmap,guard,_helpers}.yaml|tpl`
-- `/Users/ronakpatel/code/platform-factory/platform-config/charts/claims/templates/{databases.yaml,_helpers.tpl}`, `charts/claims/values.schema.json`
-- `/Users/ronakpatel/code/platform-factory/platform-config/config-connector/configconnector.yaml`, `environments/reference.yaml`
+This organisation's repos:
+- `platform-factory-concept`: `docs/adr/0018-engine-permissions-are-a-list-in-platform-roles.md`
+- `platform-config`: `charts/system/templates/{identity,access,registry,namespace,argocd,configmap,guard,_helpers}.yaml|tpl`
+- `platform-config`: `charts/claims/templates/{databases.yaml,_helpers.tpl}`, `charts/claims/values.schema.json`
+- `platform-config`: `config-connector/configconnector.yaml`, `environments/reference.yaml`
 
 Config Connector v1.156.0 (raw files under `https://raw.githubusercontent.com/GoogleCloudPlatform/k8s-config-connector/v1.156.0/`):
 - `pkg/controller/resourceconfig/static_config.go`, `selector.go`; `pkg/controller/registration/registration_controller.go`; `pkg/controller/parent/controller.go`
@@ -438,7 +438,20 @@ credential. It refuses a role file that adds a durable delete, anything under
 `iam.roles.`, a service-account key or an act-as verb, or that puts
 `resourcemanager.projects.setIamPolicy` anywhere but the project-IAM file; and
 a grant of a policy-setting role without the condition, or with a condition
-that differs from layer 0's. It first proves it can refuse, on the fixtures in
+that differs from layer 0's.
+
+For the grants it is an allowlist, not a list of known mistakes. The Terraform
+here may hold only the custom roles, read from `roles/`, and project-level
+grants to the engine of either one of those roles or a built-in role on a
+short list per file (`BUILT_IN_ROLES` in the script). Anything else is
+refused: another kind of resource (a `_binding`, a grant on the organisation
+or on another service account), a module, a custom role written in a `.tf`
+file, a role named through a variable, a grant to anyone else. So a new way
+to grant something has to be added to the check, in review, before it can be
+used. It reads the files with regular expressions, not a Terraform parser, so
+it is a net for slips and not a proof.
+
+It first proves it can refuse, on the fixtures in
 `tests/must-fail/`, then checks the real files, then runs `terraform fmt` and
 `validate`. Advisory for now, like every check in the org (ADR-0018 §7).
 

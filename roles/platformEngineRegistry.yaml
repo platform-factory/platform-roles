@@ -1,0 +1,13 @@
+# The Config Connector engine's Artifact Registry permissions (ADR-0018 §2).
+# Replaces roles/artifactregistry.admin (about 70) with the 5 its calls need.
+# Left out on purpose: repository delete — the third deletion lock — and
+# everything about the images inside.
+title: Platform engine - Artifact Registry
+description: What Config Connector needs to create, adopt and update each System's registry and grant its team write access. No delete (ADR-0018).
+stage: GA
+includedPermissions:
+  - artifactregistry.repositories.create
+  - artifactregistry.repositories.get
+  - artifactregistry.repositories.getIamPolicy
+  - artifactregistry.repositories.setIamPolicy
+  - artifactregistry.repositories.update

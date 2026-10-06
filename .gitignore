@@ -1,0 +1,12 @@
+# Terraform working files. The lock file IS committed.
+.terraform/
+
+# State and backend config never belong in git.
+*.tfstate
+*.tfstate.*
+backend.hcl
+*.backend.hcl
+terraform.tfvars
+
+# Python
+__pycache__/
